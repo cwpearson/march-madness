@@ -6,6 +6,8 @@ from typing import Dict, List, Tuple, Any
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+import cProfile
+
 
 class TournamentSimulator:
     def __init__(
@@ -31,15 +33,11 @@ class TournamentSimulator:
         self.final_four_appearances = defaultdict(int)
         self.elite_eight_appearances = defaultdict(int)
         self.sweet_sixteen_appearances = defaultdict(int)
+        self.regions = None
 
     def load_data(self) -> None:
         """Load team data from CSV file and preprocess it"""
-        # In a real implementation, this would load the data from the CSV file
-        # For now, we'll just create a placeholder
-
-        # Example of what this function would do:
         self.teams_data = pd.read_csv(self.teams_data_path)
-        # self.teams_data["Team"] = self.teams_data["Team"].str
 
     def load_bracket(self) -> None:
         """Load the tournament bracket structure"""
@@ -74,10 +72,18 @@ class TournamentSimulator:
 
     def _get_team_by_seed(self, seed: int, region: str) -> str:
         """Get a team of the specified seed for the given region"""
-        for _, team in self.teams_data.iterrows():
-            if team["Region"] == region and team["Seed"] == seed:
-                return team["Team"]
-        raise BaseException(f"couldn't find seed={seed} region={region}")
+
+        # cache team region and seed
+        if self.regions is None:
+            self.regions = {}
+            for _, team in self.teams_data.iterrows():
+                team_region = team["Region"]
+                team_seed = team["Seed"]
+                if team_region not in self.regions:
+                    self.regions[team_region] = {}
+                self.regions[team_region][team_seed] = team["Team"]
+
+        return self.regions[region][seed]
 
     def simulate_game(self, team1: str, team2: str) -> str:
         """
@@ -122,8 +128,8 @@ class TournamentSimulator:
 
         # Weight each rating
         netrtg_weight = 0.5
-        kenpom_weight = 0.4
-        seed_weight = 0.1
+        kenpom_weight = 0.5
+        seed_weight = 0.0
 
         # scale differences in ratings
         netrtg_scale = 5
@@ -437,7 +443,7 @@ def main():
     # Set up the simulator
     teams_data_path = "kenpom.csv"
     simulator = TournamentSimulator(
-        teams_data_path=teams_data_path, num_simulations=5000
+        teams_data_path=teams_data_path, num_simulations=100
     )
 
     # Load data and bracket
@@ -448,9 +454,12 @@ def main():
     results = simulator.run_simulations()
 
     # Print and visualize results
-    print_simulation_summary(results, 64)
-    simulator.visualize_results(results)
+    print_simulation_summary(results, 10)
+    # simulator.visualize_results(results)
 
 
 if __name__ == "__main__":
-    main()
+    with cProfile.Profile() as pr:
+        main()
+        pr.print_stats(sort="cumtime")
+    # main()
