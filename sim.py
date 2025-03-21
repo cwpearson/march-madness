@@ -70,22 +70,22 @@ class TournamentSimulator:
                 team2 = self._get_team_by_seed(seed2, region)
                 self.bracket[region].append((team1, team2))
 
-    def _get_team_by_seed(self, seed: int, region: str) -> str:
+    def _get_team_by_seed(self, seed: int, region: str) -> int:
         """Get a team of the specified seed for the given region"""
 
         # cache team region and seed
         if self.regions is None:
             self.regions = {}
-            for _, team in self.teams_data.iterrows():
+            for idx, team in self.teams_data.iterrows():
                 team_region = team["Region"]
                 team_seed = team["Seed"]
                 if team_region not in self.regions:
                     self.regions[team_region] = {}
-                self.regions[team_region][team_seed] = team["Team"]
+                self.regions[team_region][team_seed] = idx
 
         return self.regions[region][seed]
 
-    def simulate_game(self, team1: str, team2: str) -> str:
+    def simulate_game(self, team1: int, team2: int) -> int:
         """
         Simulate a single game between two teams
 
@@ -98,8 +98,8 @@ class TournamentSimulator:
         """
 
         # Get team data
-        team1_data = self.teams_data[self.teams_data["Team"] == team1]
-        team2_data = self.teams_data[self.teams_data["Team"] == team2]
+        team1_data = self.teams_data.loc[team1]
+        team2_data = self.teams_data.loc[team2]
 
         # Use placeholder data if the team isn't in our dataset
         if team1_data.empty:
@@ -114,12 +114,12 @@ class TournamentSimulator:
         # The specific weights would be determined through analysis in a real implementation
 
         # Extract the metrics we'll use for prediction
-        team1_netrtg = team1_data["Sched-NetRtg"].values[0]
-        team2_netrtg = team2_data["Sched-NetRtg"].values[0]
-        team1_kenpom = team1_data["KenPom-NetRtg"].values[0]
-        team2_kenpom = team2_data["KenPom-NetRtg"].values[0]
-        team1_seed = team1_data["Seed"].values[0]
-        team2_seed = team2_data["Seed"].values[0]
+        team1_netrtg = team1_data["Sched-NetRtg"]
+        team2_netrtg = team2_data["Sched-NetRtg"]
+        team1_kenpom = team1_data["KenPom-NetRtg"]
+        team2_kenpom = team2_data["KenPom-NetRtg"]
+        team1_seed = team1_data["Seed"]
+        team2_seed = team2_data["Seed"]
 
         # Calculate advantage metrics (positive means team1 has advantage)
         netrtg_diff = team1_netrtg - team2_netrtg
@@ -151,7 +151,9 @@ class TournamentSimulator:
         randomness = np.random.normal(0, 0.1) * upset_factor
 
         # Clamp win prob betwee 0.05 and 0.95
-        win_prob = max(0.05, min(0.95, win_prob + randomness))
+        # 16 seeds beat 1 seeds 1/140 times, so clamp
+        # probability at 1/140
+        win_prob = max(1.0 / 140, min(1.0 - 1.0 / 140, win_prob + randomness))
 
         # print(f"{team1} v {team2} randomness={randomness} win_prob={win_prob}")
 
@@ -177,7 +179,7 @@ class TournamentSimulator:
             winners.append(winner)
         return winners
 
-    def simulate_region(self, region: str) -> str:
+    def simulate_region(self, region: str) -> int:
         """
         Simulate all rounds in a region
 
@@ -202,7 +204,8 @@ class TournamentSimulator:
 
         # Sweet 16
         sweet_16_teams = winners.copy()
-        for team in sweet_16_teams:
+        for team_id in sweet_16_teams:
+            team = self.teams_data.loc[team_id]["Team"]
             self.sweet_sixteen_appearances[team] += 1
 
         matchups = [(winners[i], winners[i + 1]) for i in range(0, len(winners), 2)]
@@ -210,17 +213,19 @@ class TournamentSimulator:
 
         # Elite 8
         elite_8_teams = winners.copy()
-        for team in elite_8_teams:
+        for team_id in elite_8_teams:
+            team = self.teams_data.loc[team_id]["Team"]
             self.elite_eight_appearances[team] += 1
 
         # Regional Final
         matchups = [(winners[0], winners[1])]
-        regional_winner = self.simulate_round(matchups)[0]
+        regional_winner_id = self.simulate_round(matchups)[0]
+        regional_winner = self.teams_data.loc[regional_winner_id]["Team"]
 
         # Record Final Four appearance
         self.final_four_appearances[regional_winner] += 1
 
-        return regional_winner
+        return regional_winner_id
 
     def simulate_tournament(self) -> str:
         """
@@ -263,13 +268,14 @@ class TournamentSimulator:
 
         # Run simulations
         for i in range(self.num_simulations):
-            if i % 10 == 0:
+            if i % 100 == 0:
                 print(i)
             # Reset the bracket for each simulation
             self.load_bracket()
 
             # Simulate the tournament and record the champion
-            champion = self.simulate_tournament()
+            champion_id = self.simulate_tournament()
+            champion = self.teams_data.loc[champion_id]["Team"]
             self.results[champion] += 1
 
         # Calculate probabilities
@@ -443,7 +449,7 @@ def main():
     # Set up the simulator
     teams_data_path = "kenpom.csv"
     simulator = TournamentSimulator(
-        teams_data_path=teams_data_path, num_simulations=100
+        teams_data_path=teams_data_path, num_simulations=2000
     )
 
     # Load data and bracket
@@ -454,12 +460,12 @@ def main():
     results = simulator.run_simulations()
 
     # Print and visualize results
-    print_simulation_summary(results, 10)
+    print_simulation_summary(results, 64)
     # simulator.visualize_results(results)
 
 
 if __name__ == "__main__":
-    with cProfile.Profile() as pr:
-        main()
-        pr.print_stats(sort="cumtime")
-    # main()
+    # with cProfile.Profile() as pr:
+    #     main()
+    #     pr.print_stats(sort="cumtime")
+    main()
